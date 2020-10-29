@@ -9,8 +9,16 @@ function Get-TargetResource
         $Identity,
 
         [Parameter()]
+        [System.String]
+        $Description,
+
+        [Parameter()]
         [System.Boolean]
         $AllowPrivateCalling,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowWebPSTNCalling,
 
         [Parameter()]
         [System.String]
@@ -41,6 +49,39 @@ function Get-TargetResource
         [System.String]
         [ValidateSet('Enabled', 'Disabled')]
         $BusyOnBusyEnabledType = 'Enabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $MusicOnHoldEnabledType = 'Enabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $SafeTransferEnabled = 'Enabled',
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowCloudRecordingForCalls,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowTranscriptionForCalling,
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('DisabledUserOverride', 'Disabled')]
+        $LiveCaptionsEnabledTypeForCalling = 'DisabledUserOverride',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $AutoAnswerEnabledType = 'Disabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $SpamFilteringEnabledType = 'Enabled',
 
         [Parameter()]
         [ValidateSet("Present", "Absent")]
@@ -55,39 +96,76 @@ function Get-TargetResource
     Write-Verbose -Message "Getting the Teams Calling Policy $($Identity)"
 
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
-    Add-M365DSCTelemetryEvent  -Data $data
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    Add-M365DSCTelemetryEvent -Data $data
     #endregion
 
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform SkypeForBusiness
+    $ConnectionMode = New-M365DSCConnection -Platform 'SkypeForBusiness' `
+        -InboundParameters $PSBoundParameters
 
-    $policy = Get-CsTeamsCallingPolicy -Identity $Identity -ErrorAction 'SilentlyContinue'
+    $nullReturn = $PSBoundParameters
+    $nullReturn.Ensure = "Absent"
 
-    if ($null -eq $policy)
+    try
     {
-        Write-Verbose -Message "Could not find Teams Calling Policy ${$Identity}"
+        $policy = Get-CsTeamsCallingPolicy -Identity $Identity -ErrorAction 'SilentlyContinue'
+
+        if ($null -eq $policy)
+        {
+            Write-Verbose -Message "Could not find Teams Calling Policy ${$Identity}"
+            return $nullReturn
+        }
+        Write-Verbose -Message "Found Teams Calling Policy {$Identity}"
         return @{
-            Identity           = $Identity
-            Ensure             = 'Absent'
-            GlobalAdminAccount = $GlobalAdminAccount
+            Identity                          = $Identity
+            AllowPrivateCalling               = $policy.AllowPrivateCalling
+            AllowWebPSTNCalling               = $policy.AllowWebPSTNCalling
+            AllowVoicemail                    = $policy.AllowVoicemail
+            AllowCallGroups                   = $policy.AllowCallGroups
+            AllowDelegation                   = $policy.AllowDelegation
+            AllowCallForwardingToUser         = $policy.AllowCallForwardingToUser
+            AllowCallForwardingToPhone        = $policy.AllowCallForwardingToPhone
+            Description                       = $policy.Description
+            PreventTollBypass                 = $policy.PreventTollBypass
+            BusyOnBusyEnabledType             = $policy.BusyOnBusyEnabledType
+            MusicOnHoldEnabledType            = $policy.MusicOnHoldEnabledType
+            SafeTransferEnabled               = $policy.SafeTransferEnabled
+            AllowCloudRecordingForCalls       = $policy.AllowCloudRecordingForCalls
+            AllowTranscriptionForCalling      = $policy.AllowTranscriptionForCalling
+            LiveCaptionsEnabledTypeForCalling = $policy.LiveCaptionsEnabledTypeForCalling
+            AutoAnswerEnabledType             = $policy.AutoAnswerEnabledType
+            SpamFilteringEnabledType          = $policy.SpamFilteringEnabledType
+            Ensure                            = 'Present'
+            GlobalAdminAccount                = $GlobalAdminAccount
         }
     }
-    Write-Verbose -Message "Found Teams Calling Policy {$Identity}"
-    return @{
-        Identity                   = $Identity
-        AllowPrivateCalling        = $policy.AllowPrivateCalling
-        AllowVoicemail             = $policy.AllowVoicemail
-        AllowCallGroups            = $policy.AllowCallGroups
-        AllowDelegation            = $policy.AllowDelegation
-        AllowCallForwardingToUser  = $policy.AllowCallForwardingToUser
-        AllowCallForwardingToPhone = $policy.AllowCallForwardingToPhone
-        PreventTollBypass          = $policy.PreventTollBypass
-        BusyOnBusyEnabledType      = $policy.BusyOnBusyEnabledType
-        Ensure                     = 'Present'
-        GlobalAdminAccount         = $GlobalAdminAccount
+    catch
+    {
+        try
+        {
+            Write-Verbose -Message $_
+            $tenantIdValue = ""
+            if (-not [System.String]::IsNullOrEmpty($TenantId))
+            {
+                $tenantIdValue = $TenantId
+            }
+            elseif ($null -ne $GlobalAdminAccount)
+            {
+                $tenantIdValue = $GlobalAdminAccount.UserName.Split('@')[0]
+            }
+            Add-M365DSCEvent -Message $_ -EntryType 'Error' `
+                -EventID 1 -Source $($MyInvocation.MyCommand.Source) `
+                -TenantId $tenantIdValue
+        }
+        catch
+        {
+            Write-Verbose -Message $_
+        }
+        return $nullReturn
     }
 }
 
@@ -101,8 +179,16 @@ function Set-TargetResource
         $Identity,
 
         [Parameter()]
+        [System.String]
+        $Description,
+
+        [Parameter()]
         [System.Boolean]
         $AllowPrivateCalling,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowWebPSTNCalling,
 
         [Parameter()]
         [System.String]
@@ -135,6 +221,39 @@ function Set-TargetResource
         $BusyOnBusyEnabledType = 'Enabled',
 
         [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $MusicOnHoldEnabledType = 'Enabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $SafeTransferEnabled = 'Enabled',
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowCloudRecordingForCalls,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowTranscriptionForCalling,
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('DisabledUserOverride', 'Disabled')]
+        $LiveCaptionsEnabledTypeForCalling = 'DisabledUserOverride',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $AutoAnswerEnabledType = 'Disabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $SpamFilteringEnabledType = 'Enabled',
+
+        [Parameter()]
         [ValidateSet("Present", "Absent")]
         [System.String]
         $Ensure = "Present",
@@ -147,14 +266,16 @@ function Set-TargetResource
     Write-Verbose -Message "Setting Teams Calling Policy"
 
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
     Add-M365DSCTelemetryEvent -Data $data
     #endregion
 
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform SkypeForBusiness
+    $ConnectionMode = New-M365DSCConnection -Platform 'SkypeForBusiness' `
+        -InboundParameters $PSBoundParameters
 
     $CurrentValues = Get-TargetResource @PSBoundParameters
 
@@ -192,8 +313,16 @@ function Test-TargetResource
         $Identity,
 
         [Parameter()]
+        [System.String]
+        $Description,
+
+        [Parameter()]
         [System.Boolean]
         $AllowPrivateCalling,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowWebPSTNCalling,
 
         [Parameter()]
         [System.String]
@@ -226,6 +355,39 @@ function Test-TargetResource
         $BusyOnBusyEnabledType = 'Enabled',
 
         [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $MusicOnHoldEnabledType = 'Enabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled', 'UserOverride')]
+        $SafeTransferEnabled = 'Enabled',
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowCloudRecordingForCalls,
+
+        [Parameter()]
+        [System.Boolean]
+        $AllowTranscriptionForCalling,
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('DisabledUserOverride', 'Disabled')]
+        $LiveCaptionsEnabledTypeForCalling = 'DisabledUserOverride',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $AutoAnswerEnabledType = 'Disabled',
+
+        [Parameter()]
+        [System.String]
+        [ValidateSet('Enabled', 'Disabled')]
+        $SpamFilteringEnabledType = 'Enabled',
+
+        [Parameter()]
         [ValidateSet("Present", "Absent")]
         [System.String]
         $Ensure = "Present",
@@ -234,6 +396,15 @@ function Test-TargetResource
         [System.Management.Automation.PSCredential]
         $GlobalAdminAccount
     )
+    #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
+    $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
+    $data.Add("Resource", $ResourceName)
+    $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    $data.Add("TenantId", $TenantId)
+    Add-M365DSCTelemetryEvent -Data $data
+    #endregion
 
     Write-Verbose -Message "Testing configuration of Team Calling Policy {$Identity}"
 
@@ -245,7 +416,7 @@ function Test-TargetResource
     $ValuesToCheck = $PSBoundParameters
     $ValuesToCheck.Remove('GlobalAdminAccount') | Out-Null
 
-    $TestResult = Test-Microsoft365DSCParameterState -CurrentValues $CurrentValues `
+    $TestResult = Test-M365DSCParameterState -CurrentValues $CurrentValues `
         -Source $($MyInvocation.MyCommand.Source) `
         -DesiredValues $PSBoundParameters `
         -ValuesToCheck $ValuesToCheck.Keys
@@ -265,39 +436,67 @@ function Export-TargetResource
         [System.Management.Automation.PSCredential]
         $GlobalAdminAccount
     )
-    $InformationPreference = 'Continue'
-
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
     Add-M365DSCTelemetryEvent -Data $data
     #endregion
 
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform SkypeForBusiness
-
-    $i = 1
-    [array]$policies = Get-CsTeamsCallingPolicy
-    $content = ''
-    foreach ($policy in $policies)
+    $ConnectionMode = New-M365DSCConnection -Platform 'SkypeForBusiness' `
+        -InboundParameters $PSBoundParameters
+    try
     {
-        Write-Information "    [$i/$($policies.Count)] $($policy.Identity)"
-        $params = @{
-            Identity           = $policy.Identity
-            Ensure             = 'Present'
-            GlobalAdminAccount = $GlobalAdminAccount
+        $i = 1
+        [array]$policies = Get-CsTeamsCallingPolicy
+        $content = ''
+        Write-Host "`r`n" -NoNewline
+        foreach ($policy in $policies)
+        {
+            Write-Host "    |---[$i/$($policies.Length)] $($policy.Identity)" -NoNewline
+            $params = @{
+                Identity           = $policy.Identity
+                Ensure             = 'Present'
+                GlobalAdminAccount = $GlobalAdminAccount
+            }
+            $result = Get-TargetResource @params
+            $result.GlobalAdminAccount = Resolve-Credentials -UserName "globaladmin"
+            $content += "        TeamsCallingPolicy " + (New-Guid).ToString() + "`r`n"
+            $content += "        {`r`n"
+            $currentDSCBlock = Get-DSCBlock -Params $result -ModulePath $PSScriptRoot
+            $content += Convert-DSCStringParamToVariable -DSCBlock $currentDSCBlock -ParameterName "GlobalAdminAccount"
+            $content += "        }`r`n"
+            Write-Host $Global:M365DSCEmojiGreenCheckMark
+            $i++
         }
-        $result = Get-TargetResource @params
-        $result.GlobalAdminAccount = Resolve-Credentials -UserName "globaladmin"
-        $content += "        TeamsCallingPolicy " + (New-GUID).ToString() + "`r`n"
-        $content += "        {`r`n"
-        $currentDSCBlock = Get-DSCBlock -Params $result -ModulePath $PSScriptRoot
-        $content += Convert-DSCStringParamToVariable -DSCBlock $currentDSCBlock -ParameterName "GlobalAdminAccount"
-        $content += "        }`r`n"
-        $i++
+        return $content
     }
-    return $content
+    catch
+    {
+        try
+        {
+            Write-Verbose -Message $_
+            $tenantIdValue = ""
+            if (-not [System.String]::IsNullOrEmpty($TenantId))
+            {
+                $tenantIdValue = $TenantId
+            }
+            elseif ($null -ne $GlobalAdminAccount)
+            {
+                $tenantIdValue = $GlobalAdminAccount.UserName.Split('@')[0]
+            }
+            Add-M365DSCEvent -Message $_ -EntryType 'Error' `
+                -EventID 1 -Source $($MyInvocation.MyCommand.Source) `
+                -TenantId $tenantIdValue
+        }
+        catch
+        {
+            Write-Verbose -Message $_
+        }
+        return ""
+    }
 }
 
 Export-ModuleMember -Function *-TargetResource

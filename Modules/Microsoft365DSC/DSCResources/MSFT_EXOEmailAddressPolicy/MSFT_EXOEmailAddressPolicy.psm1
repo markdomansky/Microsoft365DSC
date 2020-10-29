@@ -30,56 +30,114 @@ function Get-TargetResource
         [System.String]
         $Ensure = 'Present',
 
-        [Parameter(Mandatory = $true)]
+        [Parameter()]
         [System.Management.Automation.PSCredential]
-        $GlobalAdminAccount
+        $GlobalAdminAccount,
+
+        [Parameter()]
+        [System.String]
+        $ApplicationId,
+
+        [Parameter()]
+        [System.String]
+        $TenantId,
+
+        [Parameter()]
+        [System.String]
+        $CertificateThumbprint,
+
+        [Parameter()]
+        [System.String]
+        $CertificatePath,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $CertificatePassword
     )
 
     Write-Verbose -Message "Getting Email Address Policy configuration for $Name"
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    $data.Add("TenantId", $TenantId)
     Add-M365DSCTelemetryEvent -Data $data
     #endregion
 
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform ExchangeOnline
-
-    $AllEmailAddressPolicies = Get-EmailAddressPolicy
-
-    $EmailAddressPolicy = $AllEmailAddressPolicies | Where-Object -FilterScript { $_.Name -eq $Name }
-
-    if ($null -eq $EmailAddressPolicy)
+    if ($Global:CurrentModeIsExport)
     {
-        Write-Verbose -Message "Email Address Policy $($Name) does not exist."
-
-        $nullReturn = @{
-            Name                              = $Name
-            Priority                          = $Priority
-            EnabledEmailAddressTemplates      = $EnabledEmailAddressTemplates
-            EnabledPrimarySMTPAddressTemplate = $EnabledPrimarySMTPAddressTemplate
-            ManagedByFilter                   = $ManagedByFilter
-            Ensure                            = 'Absent'
-            GlobalAdminAccount                = $GlobalAdminAccount
-        }
-
-        return $nullReturn
+        $ConnectionMode = New-M365DSCConnection -Platform 'ExchangeOnline' `
+            -InboundParameters $PSBoundParameters `
+            -SkipModuleReload $true
     }
     else
     {
-        $result = @{
-            Name                              = $EmailAddressPolicy.Name
-            Priority                          = $EmailAddressPolicy.Priority
-            EnabledEmailAddressTemplates      = $EmailAddressPolicy.EnabledEmailAddressTemplates
-            EnabledPrimarySMTPAddressTemplate = $EmailAddressPolicy.EnabledPrimarySMTPAddressTemplate
-            ManagedByFilter                   = $EmailAddressPolicy.ManagedByFilter
-            Ensure                            = 'Present'
-            GlobalAdminAccount                = $GlobalAdminAccount
-        }
+        $ConnectionMode = New-M365DSCConnection -Platform 'ExchangeOnline' `
+            -InboundParameters $PSBoundParameters
+    }
 
-        Write-Verbose -Message "Found Email Address Policy $($Name)"
-        return $result
+    $nullReturn = @{
+        Name                              = $Name
+        Priority                          = $Priority
+        EnabledEmailAddressTemplates      = $EnabledEmailAddressTemplates
+        EnabledPrimarySMTPAddressTemplate = $EnabledPrimarySMTPAddressTemplate
+        ManagedByFilter                   = $ManagedByFilter
+        Ensure                            = 'Absent'
+        GlobalAdminAccount                = $GlobalAdminAccount
+    }
+
+    try
+    {
+        $AllEmailAddressPolicies = Get-EmailAddressPolicy -ErrorAction Stop
+
+        $EmailAddressPolicy = $AllEmailAddressPolicies | Where-Object -FilterScript { $_.Name -eq $Name }
+
+        if ($null -eq $EmailAddressPolicy)
+        {
+            Write-Verbose -Message "Email Address Policy $($Name) does not exist."
+            return $nullReturn
+        }
+        else
+        {
+            $result = @{
+                Name                              = $EmailAddressPolicy.Name
+                Priority                          = $EmailAddressPolicy.Priority
+                EnabledEmailAddressTemplates      = $EmailAddressPolicy.EnabledEmailAddressTemplates
+                EnabledPrimarySMTPAddressTemplate = $EmailAddressPolicy.EnabledPrimarySMTPAddressTemplate
+                ManagedByFilter                   = $EmailAddressPolicy.ManagedByFilter
+                Ensure                            = 'Present'
+                GlobalAdminAccount                = $GlobalAdminAccount
+            }
+
+            Write-Verbose -Message "Found Email Address Policy $($Name)"
+            return $result
+        }
+    }
+    catch
+    {
+        try
+        {
+            Write-Verbose -Message $_
+            $tenantIdValue = ""
+            if (-not [System.String]::IsNullOrEmpty($TenantId))
+            {
+                $tenantIdValue = $TenantId
+            }
+            elseif ($null -ne $GlobalAdminAccount)
+            {
+                $tenantIdValue = $GlobalAdminAccount.UserName.Split('@')[0]
+            }
+            Add-M365DSCEvent -Message $_ -EntryType 'Error' `
+                -EventID 1 -Source $($MyInvocation.MyCommand.Source) `
+                -TenantId $tenantIdValue
+        }
+        catch
+        {
+            Write-Verbose -Message $_
+        }
+        return $nullReturn
     }
 }
 
@@ -114,9 +172,29 @@ function Set-TargetResource
         [System.String]
         $Ensure = 'Present',
 
-        [Parameter(Mandatory = $true)]
+        [Parameter()]
         [System.Management.Automation.PSCredential]
-        $GlobalAdminAccount
+        $GlobalAdminAccount,
+
+        [Parameter()]
+        [System.String]
+        $ApplicationId,
+
+        [Parameter()]
+        [System.String]
+        $TenantId,
+
+        [Parameter()]
+        [System.String]
+        $CertificateThumbprint,
+
+        [Parameter()]
+        [System.String]
+        $CertificatePath,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $CertificatePassword
     )
 
     Write-Verbose -Message "Setting Email Address Policy configuration for $Name"
@@ -124,14 +202,17 @@ function Set-TargetResource
     $currentEmailAddressPolicyConfig = Get-TargetResource @PSBoundParameters
 
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    $data.Add("TenantId", $TenantId)
     Add-M365DSCTelemetryEvent -Data $data
     #endregion
 
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform ExchangeOnline
+    $ConnectionMode = New-M365DSCConnection -Platform 'ExchangeOnline' `
+        -InboundParameters $PSBoundParameters
 
     $NewEmailAddressPolicyParams = @{
         Name                              = $Name
@@ -148,7 +229,6 @@ function Set-TargetResource
         Priority                          = $Priority
         EnabledEmailAddressTemplates      = $EnabledEmailAddressTemplates
         EnabledPrimarySMTPAddressTemplate = $EnabledPrimarySMTPAddressTemplate
-        ManagedByFilter                   = $ManagedByFilter
         Confirm                           = $false
     }
 
@@ -178,9 +258,16 @@ function Set-TargetResource
     # CASE: Email Address Policy exists and it should, but has different values than the desired ones
     elseif ($Ensure -eq "Present" -and $currentEmailAddressPolicyConfig.Ensure -eq "Present")
     {
-        Write-Verbose -Message "Email Address Policy '$($Name)' already exists, but needs updating."
-        Write-Verbose -Message "Setting Email Address Policy $($Name) with values: $(Convert-M365DscHashtableToString -Hashtable $SetEmailAddressPolicyParams)"
-        Set-EmailAddressPolicy @SetEmailAddressPolicyParams
+        if ($Identity -ne 'Default Policy')
+        {
+            Write-Verbose -Message "Email Address Policy '$($Name)' already exists, but needs updating."
+            Write-Verbose -Message "Setting Email Address Policy $($Name) with values: $(Convert-M365DscHashtableToString -Hashtable $SetEmailAddressPolicyParams)"
+            Set-EmailAddressPolicy @SetEmailAddressPolicyParams
+        }
+        else
+        {
+            Write-Verbose -Message "Cannot update the Default Email Address Policy."
+        }
     }
 }
 
@@ -216,10 +303,39 @@ function Test-TargetResource
         [System.String]
         $Ensure = 'Present',
 
-        [Parameter(Mandatory = $true)]
+        [Parameter()]
         [System.Management.Automation.PSCredential]
-        $GlobalAdminAccount
+        $GlobalAdminAccount,
+
+        [Parameter()]
+        [System.String]
+        $ApplicationId,
+
+        [Parameter()]
+        [System.String]
+        $TenantId,
+
+        [Parameter()]
+        [System.String]
+        $CertificateThumbprint,
+
+        [Parameter()]
+        [System.String]
+        $CertificatePath,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $CertificatePassword
     )
+    #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
+    $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
+    $data.Add("Resource", $ResourceName)
+    $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    $data.Add("TenantId", $TenantId)
+    Add-M365DSCTelemetryEvent -Data $data
+    #endregion
 
     Write-Verbose -Message "Testing Email Address Policy configuration for $Name"
 
@@ -231,7 +347,7 @@ function Test-TargetResource
     $ValuesToCheck = $PSBoundParameters
     $ValuesToCheck.Remove('GlobalAdminAccount') | Out-Null
 
-    $TestResult = Test-Microsoft365DSCParameterState -CurrentValues $CurrentValues `
+    $TestResult = Test-M365DSCParameterState -CurrentValues $CurrentValues `
         -Source $($MyInvocation.MyCommand.Source) `
         -DesiredValues $PSBoundParameters `
         -ValuesToCheck $ValuesToCheck.Keys
@@ -247,43 +363,112 @@ function Export-TargetResource
     [OutputType([System.String])]
     param
     (
-        [Parameter(Mandatory = $true)]
+        [Parameter()]
         [System.Management.Automation.PSCredential]
-        $GlobalAdminAccount
+        $GlobalAdminAccount,
+
+        [Parameter()]
+        [System.String]
+        $ApplicationId,
+
+        [Parameter()]
+        [System.String]
+        $TenantId,
+
+        [Parameter()]
+        [System.String]
+        $CertificateThumbprint,
+
+        [Parameter()]
+        [System.String]
+        $CertificatePath,
+
+        [Parameter()]
+        [System.Management.Automation.PSCredential]
+        $CertificatePassword
     )
-    $InformationPreference = 'Continue'
     #region Telemetry
+    $ResourceName = $MyInvocation.MyCommand.ModuleName.Replace("MSFT_", "")
     $data = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-    $data.Add("Resource", $MyInvocation.MyCommand.ModuleName)
+    $data.Add("Resource", $ResourceName)
     $data.Add("Method", $MyInvocation.MyCommand)
+    $data.Add("Principal", $GlobalAdminAccount.UserName)
+    $data.Add("TenantId", $TenantId)
     Add-M365DSCTelemetryEvent -Data $data
     #endregion
-    Test-MSCloudLogin -CloudCredential $GlobalAdminAccount `
-        -Platform ExchangeOnline
-
-    [array]$AllEmailAddressPolicies = Get-EmailAddressPolicy
-
-    $dscContent = ""
-    $i = 1
-    foreach ($EmailAddressPolicy in $AllEmailAddressPolicies)
+    $ConnectionMode = New-M365DSCConnection -Platform 'ExchangeOnline' `
+        -InboundParameters $PSBoundParameters `
+        -SkipModuleReload $true
+    if ($null -eq (Get-Command Get-EmailAddressPolicy -ErrorAction SilentlyContinue))
     {
-        Write-Information "    [$i/$($AllEmailAddressPolicies.Count)] $($EmailAddressPolicy.Name)"
-
-        $Params = @{
-            Name               = $EmailAddressPolicy.Name
-            GlobalAdminAccount = $GlobalAdminAccount
-        }
-        $result = Get-TargetResource @Params
-        $result.GlobalAdminAccount = Resolve-Credentials -UserName "globaladmin"
-        $content = "        EXOEmailAddressPolicy " + (New-GUID).ToString() + "`r`n"
-        $content += "        {`r`n"
-        $currentDSCBlock = Get-DSCBlock -Params $result -ModulePath $PSScriptRoot
-        $content += Convert-DSCStringParamToVariable -DSCBlock $currentDSCBlock -ParameterName "GlobalAdminAccount"
-        $content += "        }`r`n"
-        $dscContent += $content
-        $i++
+        Write-Host "`r`n    $($Global:M365DSCEmojiRedX) The specified account doesn't have permissions to access Email Address Policy"
+        return ""
     }
-    return $dscContent
+
+    try
+    {
+        [array]$AllEmailAddressPolicies = Get-EmailAddressPolicy -ErrorAction Stop
+
+        $dscContent = ""
+        if ($AllEmailAddressPolicies.Length -eq 0)
+        {
+            Write-Host $Global:M365DSCEmojiGreenCheckMark
+        }
+        else
+        {
+            Write-Host "`r`n" -NoNewline
+        }
+        $i = 1
+        foreach ($EmailAddressPolicy in $AllEmailAddressPolicies)
+        {
+            Write-Host "    |---[$i/$($AllEmailAddressPolicies.Count)] $($EmailAddressPolicy.Name)" -NoNewline
+
+            $Params = @{
+                Name                  = $EmailAddressPolicy.Name
+                GlobalAdminAccount    = $GlobalAdminAccount
+                ApplicationId         = $ApplicationId
+                TenantId              = $TenantId
+                CertificateThumbprint = $CertificateThumbprint
+                CertificatePassword   = $CertificatePassword
+                CertificatePath       = $CertificatePath
+            }
+            $Results = Get-TargetResource @Params
+            $Results = Update-M365DSCExportAuthenticationResults -ConnectionMode $ConnectionMode `
+                -Results $Results
+            $dscContent += Get-M365DSCExportContentForResource -ResourceName $ResourceName `
+                -ConnectionMode $ConnectionMode `
+                -ModulePath $PSScriptRoot `
+                -Results $Results `
+                -GlobalAdminAccount $GlobalAdminAccount
+            Write-Host $Global:M365DSCEmojiGreenCheckMark
+            $i++
+        }
+        return $dscContent
+    }
+    catch
+    {
+        try
+        {
+            Write-Verbose -Message $_
+            $tenantIdValue = ""
+            if (-not [System.String]::IsNullOrEmpty($TenantId))
+            {
+                $tenantIdValue = $TenantId
+            }
+            elseif ($null -ne $GlobalAdminAccount)
+            {
+                $tenantIdValue = $GlobalAdminAccount.UserName.Split('@')[0]
+            }
+            Add-M365DSCEvent -Message $_ -EntryType 'Error' `
+                -EventID 1 -Source $($MyInvocation.MyCommand.Source) `
+                -TenantId $tenantIdValue
+        }
+        catch
+        {
+            Write-Verbose -Message $_
+        }
+        return ""
+    }
 }
 
 Export-ModuleMember -Function *-TargetResource
